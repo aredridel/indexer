@@ -1,0 +1,16 @@
+[package]
+name = "indexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "^1.0.93"
+askama = {version = "0.12.1", features = ["with-hyper"] }
+askama_hyper = "0.1.0"
+ctrlc = "^3.4.5"
+http-body-util = "^0.1.2"
+hyper = { version = "^1.5.0", features = ["http1", "server"] }
+hyper-util = { version = "^0.1.10", features = ["tokio"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = { version = "^0.1.16", features = ["net"] }
+warp = "^0.3.7"
