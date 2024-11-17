@@ -1,6 +1,7 @@
+use anyhow::Error;
 use askama_hyper::Template;
 use http_body_util::Full;
-use hyper::body::Bytes;
+use hyper::body::{Bytes, Incoming};
 use hyper::header::{HeaderValue, CONTENT_TYPE};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
@@ -19,12 +20,12 @@ struct DirentTemplate {
 }
 
 impl DirentTemplate {
-    fn file_name(&self, entry: &DirEntry) -> Result<String, anyhow::Error> {
+    fn file_name(&self, entry: &DirEntry) -> Result<String, Error> {
         entry
             .file_name()
             .to_str()
             .map(|x| x.to_owned())
-            .ok_or_else(|| anyhow::Error::msg("non utf-8 path"))
+            .ok_or_else(|| Error::msg("non utf-8 path"))
     }
 }
 
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Finally, we bind the incoming connection to our `listing` service
             if let Err(err) = http1::Builder::new()
                 // `service_fn` converts our function in a `Service`
-                .serve_connection(io, service_fn(listing))
+                .serve_connection(io, service_fn(handle))
                 .await
             {
                 eprintln!("Error serving connection: {:?}", err);
@@ -59,9 +60,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     }
 }
 
-async fn listing(
-    req: Request<hyper::body::Incoming>,
-) -> Result<Response<Full<Bytes>>, anyhow::Error> {
+async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> {
+    if let Some(q) = req.uri().query() {
+        if q.contains("image") {
+            image_handler(req).await
+        } else {
+            listing(req).await
+        }
+    } else {
+        listing(req).await
+    }
+}
+
+async fn image_handler(_req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> {
+    Ok(Response::new(Full::from("")))
+}
+
+async fn listing(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> {
     let root = PathBuf::from_str(
         req.headers()
             .get("X-Index-Root")
@@ -71,11 +86,11 @@ async fn listing(
     .canonicalize()?;
 
     let path = root
-        .join(PathBuf::from(req.uri().to_string().split_off(1)))
+        .join(PathBuf::from(req.uri().path().to_string().split_off(1)))
         .canonicalize()?;
 
     if !path.starts_with(&root) {
-        return Err(anyhow::Error::msg("path is outside of root"));
+        return Err(Error::msg("path is outside of root"));
     }
 
     let mut entries = Vec::new();
