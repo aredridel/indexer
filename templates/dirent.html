@@ -1,5 +1,10 @@
 <ul>
 	{% for ent in entries %}
-		<li><a href="{{self.file_name(ent)?}}">{{self.file_name(ent)?}}</a></li>
+		<li>
+			<a href="{{self.file_name(ent)?}}">{{self.file_name(ent)?}}</a>
+			{% if self.is_image(ent)? %}
+				<img src="?thumbnail={{self.file_name(ent)?}}">
+			{% endif %}
+		</li>
 	{% endfor %}
 </ul>
