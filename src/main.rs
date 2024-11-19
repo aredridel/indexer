@@ -1,8 +1,9 @@
 use anyhow::Error;
 use askama_hyper::Template;
+use etag::EntityTag;
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
-use hyper::header::{HeaderValue, CONTENT_TYPE};
+use hyper::header::{HeaderValue, CONTENT_TYPE, ETAG};
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response};
@@ -125,11 +126,30 @@ async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> 
     }
 }
 
+trait EtagRejectable {
+    fn satisfies_request(&self, req: &Request<Incoming>) -> bool;
+}
+
+impl EtagRejectable for EntityTag {
+    fn satisfies_request(&self, req: &Request<Incoming>) -> bool {
+        if let Some(h) = req.headers().get("if-none-match") {
+            if let Ok(check_etag) = h.to_str().unwrap_or("").parse::<EntityTag>() {
+                return check_etag.weak_eq(self);
+            }
+        }
+        false
+    }
+}
+
 async fn thumbnail(
-    _req: &Request<Incoming>,
+    req: &Request<Incoming>,
     path: &Path,
     q: &str,
 ) -> Result<Response<Full<Bytes>>, Error> {
+    let et = EntityTag::from_file_meta(&fs::metadata(path)?);
+    if et.satisfies_request(req) {
+        return Ok(Response::builder().status(304).body(Full::from(""))?);
+    }
     let mut parsed = form_urlencoded::parse(q.as_bytes());
     let mut thumb = path.to_path_buf();
     thumb.push(
@@ -146,7 +166,10 @@ async fn thumbnail(
     let mut cursor = Cursor::new(&mut buf);
 
     resized.write_to(&mut cursor, ImageFormat::Png)?;
-    Ok(Response::new(Full::from(buf)))
+    let res = Response::builder()
+        .header(ETAG, et.to_string())
+        .body(Full::from(buf))?;
+    Ok(res)
 }
 
 async fn listing(path: &Path) -> Result<Response<Full<Bytes>>, Error> {

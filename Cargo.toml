@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "^1.0.93"
 askama = { version = "0.12.1", features = ["with-hyper"] }
 askama_hyper = "0.1.0"
+etag = { version = "4.0.0", features = ["std"] }
 form_urlencoded = "^1.2.1"
 http-body-util = "^0.1.2"
 hyper = { version = "^1.5.0", features = ["http1", "server"] }
