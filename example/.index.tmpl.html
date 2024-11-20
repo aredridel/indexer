@@ -1,0 +1,18 @@
+<ul>
+	{% for ent in entries %}
+		<li>
+			<a href="{{ent.file_name}}">{{ent.file_name}}</a>
+			{% if ent.is_image %}
+				<img src="?thumbnail={{ent.file_name}}" width="50" height="50">
+			{% endif %}
+			{% if ent.is_dir %}
+				/
+				{% for inner in ent.children %}
+					{% if inner.is_image %}
+						<a href="{{ent.file_name}}/{{inner.file_name}}"><img src="{{ent.file_name}}?thumbnail={{inner.file_name}}" width="50" height="50"></a>
+					{% endif %}
+				{% endfor %}
+			{% endif %}
+		</li>
+	{% endfor %}
+</ul>

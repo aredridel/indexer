@@ -1,5 +1,4 @@
 use anyhow::Error;
-use askama_hyper::Template;
 use etag::EntityTag;
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
@@ -10,37 +9,59 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use image::imageops::FilterType::Lanczos3;
 use image::{ImageFormat, ImageReader};
+use serde::Serialize;
 use std::error::Error as StdError;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use tera::{Context, Tera};
 use tokio::net::UnixListener;
 
-#[derive(Template)]
-#[template(path = "dirent.html")]
-struct DirentTemplate {
-    path: PathBuf,
+struct DirentTemplate;
+
+#[derive(Serialize, Debug)]
+struct Entry {
+    file_name: String,
+    is_dir: bool,
+    is_image: bool,
+    children: Option<Vec<Entry>>,
 }
 
 impl DirentTemplate {
-    fn entries(&self) -> Result<impl Iterator<Item = fs::DirEntry> + '_, impl StdError> {
-        self.entries_(&self.path)
-    }
-
-    fn children(
-        &self,
-        entry: &fs::DirEntry,
-    ) -> Result<impl Iterator<Item = fs::DirEntry> + '_, impl StdError> {
-        self.entries_(&entry.path())
-    }
-
-    fn entries_(
-        &self,
-        path: &Path,
-    ) -> Result<impl Iterator<Item = fs::DirEntry> + '_, impl StdError> {
+    fn entries(&self, path: &Path, include_children: bool) -> Result<Vec<Entry>, impl StdError> {
         fs::read_dir(path).map(|r| {
-            r.filter_map(|e| e.map_or(None, |e| if self.is_hidden(&e) { None } else { Some(e) }))
+            r.filter_map(|e| {
+                e.map_or(None, |de| {
+                    if self.is_hidden(&de) {
+                        None
+                    } else {
+                        let e = self.entry_for_dirent(&de, include_children);
+                        match e {
+                            Ok(ent) => Some(ent),
+                            Err(_) => None,
+                        }
+                    }
+                })
+            })
+            .collect()
+        })
+    }
+
+    fn entry_for_dirent(&self, de: &fs::DirEntry, include_children: bool) -> Result<Entry, Error> {
+        let is_dir = de.file_type()?.is_dir();
+        Ok(Entry {
+            file_name: de
+                .file_name()
+                .into_string()
+                .map_err(|_e| Error::msg("non-utf-8 filename"))?,
+            is_image: self.is_image(de)?,
+            is_dir,
+            children: if is_dir && include_children {
+                Some(self.entries(&de.path(), false)?)
+            } else {
+                None
+            },
         })
     }
 
@@ -50,14 +71,6 @@ impl DirentTemplate {
             .to_str()
             .map(|s| s.starts_with("."))
             .unwrap_or(true)
-    }
-
-    fn file_name(&self, entry: &fs::DirEntry) -> Result<String, Error> {
-        entry
-            .file_name()
-            .to_str()
-            .map(|x| x.to_owned())
-            .ok_or_else(|| Error::msg("non utf-8 path"))
     }
 
     fn is_image(&self, entry: &fs::DirEntry) -> Result<bool, Error> {
@@ -119,10 +132,10 @@ async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> 
         if q.contains("thumbnail") {
             thumbnail(&req, &path, q).await
         } else {
-            listing(&path).await
+            listing(&root, &path).await
         }
     } else {
-        listing(&path).await
+        listing(&root, &path).await
     }
 }
 
@@ -172,13 +185,34 @@ async fn thumbnail(
     Ok(res)
 }
 
-async fn listing(path: &Path) -> Result<Response<Full<Bytes>>, Error> {
-    let ctx = DirentTemplate {
-        path: path.to_path_buf(),
-    };
+async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Error> {
+    let ctx = DirentTemplate {};
+
+    let mut tmpl_dir = path.to_path_buf();
+    let mut tmpl: Option<Vec<u8>> = None;
+    while tmpl_dir.starts_with(root) {
+        let mut tmpl_path = tmpl_dir.clone();
+        tmpl_path.push(".index.tmpl.html");
+        let t = fs::read(tmpl_path);
+        if t.is_ok() {
+            tmpl = Some(t.unwrap());
+            break;
+        }
+        tmpl_dir.pop();
+    }
+
+    if tmpl.is_none() {
+        return Err(Error::msg("no template found"));
+    }
+
+    let mut context = Context::new();
+    let entries = &ctx.entries(path, true)?;
+    context.insert("entries", entries);
+    let tstr = String::from_utf8(tmpl.unwrap())?;
+    let tera = Tera::one_off(tstr.as_str(), &context, true)?;
 
     Ok(Response::builder()
         .header(CONTENT_TYPE, HeaderValue::from_static("text/html"))
-        .body(Full::new(Bytes::from(ctx.render().unwrap())))
+        .body(Full::new(Bytes::from(tera)))
         .unwrap())
 }
