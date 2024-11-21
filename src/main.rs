@@ -123,7 +123,6 @@ async fn handle_and_map_err(req: Request<Incoming>) -> Result<Response<Full<Byte
     let result = handle(req).await;
     match result {
         Err(err) => {
-            eprintln!("{:?}", err.to_string());
             Ok(Response::builder()
                 .status(500)
                 .body(Full::from(err.to_string()))
@@ -211,32 +210,35 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
     let ctx = DirentTemplate {};
 
     let mut tmpl_dir = path.to_path_buf();
-    let mut tmpl: Option<String> = None;
+    let mut tera: Option<Tera> = None;
     while tmpl_dir.starts_with(root) {
         let mut tmpl_path = tmpl_dir.clone();
         tmpl_path.push(".templates");
-        tmpl_path.push("index.html");
-        let contents = fs::read(tmpl_path);
-        if contents.is_ok() {
-            let t = String::from_utf8(contents.unwrap())?;
-            tmpl = Some(t);
-            break;
+        tmpl_path.push("*.html");
+        let tera_path_str = tmpl_path.to_str();
+        if let Some(path) = tera_path_str {
+            let tmpl = Tera::new(path);
+            if let Ok(tmpl) = tmpl {
+                if tmpl.get_template_names().any(|e| e == "index.html") {
+                    tera = Some(tmpl);
+                    break;
+                }
+            }
         }
         tmpl_dir.pop();
     }
 
-    if tmpl.is_none() {
-        return Err(Error::msg("no template found"));
-    }
+    let mut tera = match tera {
+        None => return Err(Error::msg("no template directory found")),
+        Some(tera) => tera,
+    };
 
-    let mut tera = Tera::default();
     tera.register_filter("as_bytes", AsBytesFilter);
-    tera.add_raw_template("index", &tmpl.unwrap())?;
     let mut context = Context::new();
     let mut entries = ctx.entries(path, true)?;
     entries.sort_by_key(|f| f.file_name.clone());
     context.insert("entries", &entries);
-    let body = tera.render("index", &context)?;
+    let body = tera.render("index.html", &context)?;
 
     Ok(Response::builder()
         .header(CONTENT_TYPE, HeaderValue::from_static("text/html"))
