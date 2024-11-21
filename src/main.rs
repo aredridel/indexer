@@ -10,19 +10,25 @@ use hyper_util::rt::TokioIo;
 use image::imageops::FilterType::Lanczos3;
 use image::{ImageFormat, ImageReader};
 use serde::Serialize;
+use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fs;
 use std::io::Cursor;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tera::{Context, Tera};
 use tokio::net::UnixListener;
+
+mod as_byte_filter;
+use as_byte_filter::AsBytesFilter;
 
 struct DirentTemplate;
 
 #[derive(Serialize, Debug)]
 struct Entry {
     file_name: String,
+    size: u64,
     is_dir: bool,
     is_image: bool,
     children: Option<Vec<Entry>>,
@@ -50,6 +56,7 @@ impl DirentTemplate {
 
     fn entry_for_dirent(&self, de: &fs::DirEntry, include_children: bool) -> Result<Entry, Error> {
         let is_dir = de.file_type()?.is_dir();
+        let metadata = de.metadata()?;
         Ok(Entry {
             file_name: de
                 .file_name()
@@ -57,6 +64,7 @@ impl DirentTemplate {
                 .map_err(|_e| Error::msg("non-utf-8 filename"))?,
             is_image: self.is_image(de)?,
             is_dir,
+            size: metadata.size(),
             children: if is_dir && include_children {
                 Some(self.entries(&de.path(), false)?)
             } else {
@@ -102,12 +110,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             // Finally, we bind the incoming connection to our `listing` service
             if let Err(err) = http1::Builder::new()
                 // `service_fn` converts our function in a `Service`
-                .serve_connection(io, service_fn(handle))
+                .serve_connection(io, service_fn(handle_and_map_err))
                 .await
             {
                 eprintln!("Error serving connection: {:?}", err);
             }
         });
+    }
+}
+
+async fn handle_and_map_err(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Infallible> {
+    let result = handle(req).await;
+    match result {
+        Err(err) => {
+            eprintln!("{:?}", err.to_string());
+            Ok(Response::builder()
+                .status(500)
+                .body(Full::from(err.to_string()))
+                .unwrap())
+        }
+        Ok(response) => Ok(response),
     }
 }
 
@@ -189,13 +211,14 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
     let ctx = DirentTemplate {};
 
     let mut tmpl_dir = path.to_path_buf();
-    let mut tmpl: Option<Vec<u8>> = None;
+    let mut tmpl: Option<String> = None;
     while tmpl_dir.starts_with(root) {
         let mut tmpl_path = tmpl_dir.clone();
         tmpl_path.push(".index.tmpl.html");
-        let t = fs::read(tmpl_path);
-        if t.is_ok() {
-            tmpl = Some(t.unwrap());
+        let contents = fs::read(tmpl_path);
+        if contents.is_ok() {
+            let t = String::from_utf8(contents.unwrap())?;
+            tmpl = Some(t);
             break;
         }
         tmpl_dir.pop();
@@ -205,14 +228,17 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
         return Err(Error::msg("no template found"));
     }
 
+    let mut tera = Tera::default();
+    tera.register_filter("as_bytes", AsBytesFilter);
+    tera.add_raw_template("index", &tmpl.unwrap())?;
     let mut context = Context::new();
-    let entries = &ctx.entries(path, true)?;
-    context.insert("entries", entries);
-    let tstr = String::from_utf8(tmpl.unwrap())?;
-    let tera = Tera::one_off(tstr.as_str(), &context, true)?;
+    let mut entries = ctx.entries(path, true)?;
+    entries.sort_by_key(|f| f.file_name.clone());
+    context.insert("entries", &entries);
+    let body = tera.render("index", &context)?;
 
     Ok(Response::builder()
         .header(CONTENT_TYPE, HeaderValue::from_static("text/html"))
-        .body(Full::new(Bytes::from(tera)))
+        .body(Full::new(Bytes::from(body)))
         .unwrap())
 }

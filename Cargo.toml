@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "^1.0.93"
+byte-unit = "5.1.6"
 etag = { version = "4.0.0", features = ["std"] }
 form_urlencoded = "^1.2.1"
 http-body-util = "^0.1.2"
