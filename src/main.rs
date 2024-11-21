@@ -214,7 +214,8 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
     let mut tmpl: Option<String> = None;
     while tmpl_dir.starts_with(root) {
         let mut tmpl_path = tmpl_dir.clone();
-        tmpl_path.push(".index.tmpl.html");
+        tmpl_path.push(".templates");
+        tmpl_path.push("index.html");
         let contents = fs::read(tmpl_path);
         if contents.is_ok() {
             let t = String::from_utf8(contents.unwrap())?;
