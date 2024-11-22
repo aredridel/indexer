@@ -1,19 +1,49 @@
-<ul>
+{% extends "layout.html" %}
+
+{% block table %}
+<table class="directory">
+	{% if path != "/" %}
+		<tr class="directory"><td class="parent"><a href="../">Parent Directory</a></td></tr>
+	{% endif %}
 	{% for ent in entries %}
-		<li>
-			<a href="{{ent.file_name}}">{{ent.file_name}}</a>
-			{% if ent.is_image %}
-				<img src="?thumbnail={{ent.file_name}}" width="50" height="50">
-			{% elif ent.is_dir %}
-				/
-				{% for inner in ent.children %}
-					{% if inner.is_image %}
-						<a href="{{ent.file_name}}/{{inner.file_name}}"><img src="{{ent.file_name}}?thumbnail={{inner.file_name}}" width="50" height="50"></a>
-					{% endif %}
-				{% endfor %}
-			{% else %}
-				{{ent.size | as_bytes}}
-			{% endif %}
-		</li>
+		{% if ent.is_image %}
+			<tr class='images'>
+				<td class='image'>
+					<a href="{{ent.file_name | urlencode}}"><img src="?thumbnail={{ent.file_name | urlencode}}" width="50" height="50"></a>
+				</td>
+				<td class='time'>{{ ent.time | date(format="%Y-%m-%d %H:%M:%S") }}</td>
+				<td>
+					{{ ent.size | as_bytes}} <!-- { entry.description }} -->
+				</td>
+			</tr>
+		{% endif %}
 	{% endfor %}
-</ul>
+
+	{% for ent in entries %}
+		{% if not ent.is_image %}
+			<tr class="directory">
+				<td class="file">
+					<a href="{{ent.file_name | urlencode}}">{{ent.file_name}}{{ent.type_marker}}</a>
+				</td>
+
+				<td class="time">{{ ent.time | date(format="%Y-%m-%d %H:%M:%S") }}</td>
+
+				<td>
+					{{ent.size | as_bytes}}
+					<!-- { ent.description }} -->
+				</td>
+
+				<td>
+					{% if ent.is_dir %}
+						{% for inner in ent.children %}
+							{% if inner.is_image %}
+								<a href="{{ent.file_name}}/{{inner.file_name}}"><img src="{{ent.file_name}}?thumbnail={{inner.file_name}}" width="50" height="50"></a>
+							{% endif %}
+						{% endfor %}
+					{% endif %}
+				</td>
+			</tr>
+		{% endif %}
+	{% endfor %}
+</table>
+{% endblock table %}

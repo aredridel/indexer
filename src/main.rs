@@ -17,6 +17,7 @@ use std::io::Cursor;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tera::{Context, Tera};
 use tokio::net::UnixListener;
 
@@ -29,6 +30,8 @@ struct DirentTemplate;
 struct Entry {
     file_name: String,
     size: u64,
+    type_marker: String,
+    time: u64,
     is_dir: bool,
     is_image: bool,
     children: Option<Vec<Entry>>,
@@ -64,6 +67,8 @@ impl DirentTemplate {
                 .map_err(|_e| Error::msg("non-utf-8 filename"))?,
             is_image: self.is_image(de)?,
             is_dir,
+            time: metadata.created()?.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            type_marker: if is_dir { "/" } else { "" }.to_string(),
             size: metadata.size(),
             children: if is_dir && include_children {
                 Some(self.entries(&de.path(), false)?)
@@ -123,9 +128,11 @@ async fn handle_and_map_err(req: Request<Incoming>) -> Result<Response<Full<Byte
     let result = handle(req).await;
     match result {
         Err(err) => {
+            eprintln!("{:?}", err);
             Ok(Response::builder()
                 .status(500)
-                .body(Full::from(err.to_string()))
+                .header(CONTENT_TYPE, "text/plain")
+                .body(Full::from(format!("{:?}", err)))
                 .unwrap())
         }
         Ok(response) => Ok(response),
@@ -153,10 +160,10 @@ async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> 
         if q.contains("thumbnail") {
             thumbnail(&req, &path, q).await
         } else {
-            listing(&root, &path).await
+            listing(&req, &root, &path).await
         }
     } else {
-        listing(&root, &path).await
+        listing(&req, &root, &path).await
     }
 }
 
@@ -206,7 +213,11 @@ async fn thumbnail(
     Ok(res)
 }
 
-async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Error> {
+async fn listing(
+    req: &Request<Incoming>,
+    root: &Path,
+    path: &Path,
+) -> Result<Response<Full<Bytes>>, Error> {
     let ctx = DirentTemplate {};
 
     let mut tmpl_dir = path.to_path_buf();
@@ -217,12 +228,10 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
         tmpl_path.push("*.html");
         let tera_path_str = tmpl_path.to_str();
         if let Some(path) = tera_path_str {
-            let tmpl = Tera::new(path);
-            if let Ok(tmpl) = tmpl {
-                if tmpl.get_template_names().any(|e| e == "index.html") {
-                    tera = Some(tmpl);
-                    break;
-                }
+            let tmpl = Tera::new(path)?;
+            if tmpl.get_template_names().any(|e| e == "index.html") {
+                tera = Some(tmpl);
+                break;
             }
         }
         tmpl_dir.pop();
@@ -238,6 +247,17 @@ async fn listing(root: &Path, path: &Path) -> Result<Response<Full<Bytes>>, Erro
     let mut entries = ctx.entries(path, true)?;
     entries.sort_by_key(|f| f.file_name.clone());
     context.insert("entries", &entries);
+    context.insert("path", req.uri().path());
+
+    let mut desc_path = path.to_path_buf();
+    desc_path.push("README.md");
+    if let Ok(desc) = fs::read(desc_path) {
+        let desc = String::from_utf8_lossy(&desc);
+        let html = markdown::to_html(&desc);
+        context.insert("description", &html);
+    } else {
+        context.insert("description", "");
+    }
     let body = tera.render("index.html", &context)?;
 
     Ok(Response::builder()

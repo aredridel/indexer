@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+    <head>
+		 <link rel="StyleSheet" href="/example/site.css" />
+		 <title>Index of {{path}}</title>
+    </head>
+    <body>
+		 <h1>Index of {{path}}</h1>
+		 <!--
+		  <table class="directory">
+			<tr class="directory"><td class="parent" colspan="3"><a href="../">Parent Directory</a></td></tr>
+			<% images.each do |entry| %>
+			<tr class='images'><td class='image'><a href="<%= entry.pathurl %>"><img src='<%= entry.thumbnail %>' title='<%= entry.path %>' /></a></td><td class='time'><%= entry.time %></td><td><%= entry.size %> <%= entry.description %></td></tr>
+			<% end %>
+			<% entries.each do |entry| %>
+			<tr class="directory"><td class="file"><a href="<%= entry.pathurl %>"><%= entry.path %><%= entry.type %></a></td><td class="time"><%= entry.time %></td><td><%= entry.size %> <%= entry.description %> <%= entry.images %></td></tr>
+			<% end %>
+		</table>
+		-->
+
+		{% block table %}
+		{% endblock table %}
+		<!--
+		<% if File.exist?(File.join(systempath, 'README.md')) %>
+		<%= RDiscount.new(File.read(File.join(systempath, 'README.md'))).to_html %>
+		<% end %>
+		-->
+		
+		{% if description %}
+			<section class="description">
+				{{ description | safe}}
+			</section>
+		{% endif %}
+
+    </body>
+</html>
