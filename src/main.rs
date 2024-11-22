@@ -1,4 +1,4 @@
-use anyhow::{Context as AnyhowContext, Error, Result as AnyhowResult};
+use anyhow::{bail, Context as AnyhowContext, Error, Result as AnyhowResult};
 use etag::EntityTag;
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
@@ -92,7 +92,8 @@ async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
             .get("X-Index-Root")
             .ok_or_else(|| Error::msg("missing X-Index-Root header"))?
             .to_str()?,
-    )?
+    )
+    .with_context(|| "cannot construct root pathbuf")?
     .canonicalize()
     .with_context(|| "could not canonicalize root")?;
 
@@ -104,7 +105,7 @@ async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
 
     let uripath = req.uri().path().to_string();
     if !uripath.starts_with(base) {
-        return Err(Error::msg("path is outside of base"));
+        bail!("path is outside of base");
     }
 
     let uripath = uripath[base.len() + 1..].to_string();
@@ -112,10 +113,15 @@ async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
     let path = root
         .join(PathBuf::from(&uripath))
         .canonicalize()
-        .with_context(|| format!("could not canonicalize path {:?}", uripath))?;
+        .with_context(|| {
+            format!(
+                "could not canonicalize path {:?} within {:?}",
+                uripath, root
+            )
+        })?;
 
     if !path.starts_with(&root) {
-        return Err(Error::msg("path is outside of root"));
+        bail!("path is outside of root");
     }
 
     if let Some(q) = req.uri().query() {
@@ -149,7 +155,8 @@ async fn thumbnail(
     path: &Path,
     q: &str,
 ) -> AnyhowResult<Response<Full<Bytes>>> {
-    let et = EntityTag::from_file_meta(&fs::metadata(path)?);
+    let md = fs::metadata(path).with_context(|| format!("file {:?}", path))?;
+    let et = EntityTag::from_file_meta(&md);
     if et.satisfies_request(req) {
         return Ok(Response::builder().status(304).body(Full::from(""))?);
     }
@@ -188,7 +195,7 @@ async fn listing(
         tmpl_path.push("*.html");
         let tera_path_str = tmpl_path.to_str();
         if let Some(path) = tera_path_str {
-            let tmpl = Tera::new(path)?;
+            let tmpl = Tera::new(path).with_context(|| format!("template directory {:?}", path))?;
             if tmpl.get_template_names().any(|e| e == "index.html") {
                 tera = Some(tmpl);
                 break;
@@ -198,13 +205,14 @@ async fn listing(
     }
 
     let mut tera = match tera {
-        None => return Err(Error::msg("no template directory found")),
+        None => bail!("no template directory found"),
         Some(tera) => tera,
     };
 
     tera.register_filter("as_bytes", AsBytesFilter);
     let mut context = Context::new();
-    let mut entries = Entry::entries(path, true)?;
+    let mut entries =
+        Entry::entries(path, true).with_context(|| format!("getting entries for {:?}", path))?;
     entries.sort_by_key(|f| f.file_name.clone());
     context.insert("entries", &entries);
     context.insert("path", req.uri().path());
