@@ -13,7 +13,10 @@
 				</td>
 				<td class='time'>{{ ent.time | date(format="%Y-%m-%d %H:%M:%S") }}</td>
 				<td>
-					{{ ent.size | as_bytes}} <!-- { entry.description }} -->
+					{{ ent.size | as_bytes}}
+				</td>
+				<td>
+					{{ ent.description }}
 				</td>
 			</tr>
 		{% endif %}
@@ -29,11 +32,11 @@
 				<td class="time">{{ ent.time | date(format="%Y-%m-%d %H:%M:%S") }}</td>
 
 				<td>
-					{{ent.size | as_bytes}}
-					<!-- { ent.description }} -->
+					{{ ent.size | as_bytes }}
 				</td>
 
 				<td>
+					{{ ent.description }}
 					{% if ent.is_dir %}
 						{% for inner in ent.children %}
 							{% if inner.is_image %}

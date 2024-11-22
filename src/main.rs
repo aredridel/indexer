@@ -17,7 +17,7 @@ use std::io::Cursor;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 use tera::{Context, Tera};
 use tokio::net::UnixListener;
 
@@ -28,13 +28,14 @@ struct DirentTemplate;
 
 #[derive(Serialize, Debug)]
 struct Entry {
+    children: Option<Vec<Entry>>,
+    description: String,
     file_name: String,
-    size: u64,
-    type_marker: String,
-    time: u64,
     is_dir: bool,
     is_image: bool,
-    children: Option<Vec<Entry>>,
+    size: u64,
+    time: u64,
+    type_marker: String,
 }
 
 impl DirentTemplate {
@@ -60,6 +61,9 @@ impl DirentTemplate {
     fn entry_for_dirent(&self, de: &fs::DirEntry, include_children: bool) -> Result<Entry, Error> {
         let is_dir = de.file_type()?.is_dir();
         let metadata = de.metadata()?;
+        let xa = xattr::get(de.path(), "description").map_or("".to_string(), |e| {
+            e.map_or("".to_string(), |e| String::from_utf8_lossy(&e).to_string())
+        });
         Ok(Entry {
             file_name: de
                 .file_name()
@@ -67,7 +71,12 @@ impl DirentTemplate {
                 .map_err(|_e| Error::msg("non-utf-8 filename"))?,
             is_image: self.is_image(de)?,
             is_dir,
-            time: metadata.created()?.duration_since(UNIX_EPOCH).unwrap().as_secs(),
+            description: xa,
+            time: metadata
+                .created()?
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             type_marker: if is_dir { "/" } else { "" }.to_string(),
             size: metadata.size(),
             children: if is_dir && include_children {
