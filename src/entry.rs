@@ -1,21 +1,29 @@
+use anyhow::{Error, Result};
+use serde::Serialize;
+use std::error::Error as StdError;
+use std::fs;
+use std::os::unix::fs::MetadataExt;
+use std::path::Path;
+use std::time::UNIX_EPOCH;
+
 #[derive(Serialize, Debug)]
 pub struct Entry {
-    children: Option<Vec<Entry>>,
-    description: String,
-    file_name: String,
-    is_dir: bool,
-    is_image: bool,
-    size: u64,
-    time: u64,
-    type_marker: String,
+    pub children: Option<Vec<Entry>>,
+    pub description: String,
+    pub file_name: String,
+    pub is_dir: bool,
+    pub is_image: bool,
+    pub size: u64,
+    pub time: u64,
+    pub type_marker: String,
 }
 
 impl Entry {
-    fn entries(path: &Path, include_children: bool) -> Result<Vec<Entry>, impl StdError> {
+    pub fn entries(path: &Path, include_children: bool) -> Result<Vec<Entry>, impl StdError> {
         fs::read_dir(path).map(|r| {
             r.filter_map(|e| {
                 e.map_or(None, |de| {
-                    if self.is_hidden(&de) {
+                    if Entry::is_hidden(&de) {
                         None
                     } else {
                         let e = Entry::from_dirent(&de, include_children);
@@ -30,7 +38,7 @@ impl Entry {
         })
     }
 
-    fn from_dirent(de: &fs::DirEntry, include_children: bool) -> Result<Entry, Error> {
+    fn from_dirent(de: &fs::DirEntry, include_children: bool) -> Result<Entry> {
         let is_dir = de.file_type()?.is_dir();
         let metadata = de.metadata()?;
         let xa = xattr::get(de.path(), "description").map_or("".to_string(), |e| {
@@ -40,7 +48,7 @@ impl Entry {
             file_name: de
                 .file_name()
                 .into_string()
-                .map_err(|_e| Error::msg("non-utf-8 filename"))?,
+                .map_err(|_| Error::msg("non utf-8 path"))?,
             is_image: Entry::is_image(de)?,
             is_dir,
             description: xa,
@@ -67,7 +75,7 @@ impl Entry {
             .unwrap_or(true)
     }
 
-    fn is_image(entry: &fs::DirEntry) -> Result<bool, Error> {
+    fn is_image(entry: &fs::DirEntry) -> Result<bool> {
         entry
             .file_name()
             .to_str()

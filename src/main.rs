@@ -1,4 +1,4 @@
-use anyhow::Error;
+use anyhow::{Context as AnyhowContext, Error, Result as AnyhowResult};
 use etag::EntityTag;
 use http_body_util::Full;
 use hyper::body::{Bytes, Incoming};
@@ -9,17 +9,13 @@ use hyper::{Request, Response};
 use hyper_util::rt::TokioIo;
 use image::imageops::FilterType::Lanczos3;
 use image::{ImageFormat, ImageReader};
-use serde::Serialize;
 use std::convert::Infallible;
-use std::error::Error as StdError;
 use std::fs;
 use std::io::Cursor;
 #[cfg(target_os = "linux")]
 use std::os::fd::FromRawFd;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::UNIX_EPOCH;
 use tera::{Context, Tera};
 use tokio::net::UnixListener;
 
@@ -40,7 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         UnixListener::bind("warp.sock").unwrap()
     } else {
-        let std_listener = unsafe { std::os::unix::net::UnixListener::from_raw_fd(listenfds.iter().next().unwrap()) };
+        let std_listener = unsafe {
+            std::os::unix::net::UnixListener::from_raw_fd(listenfds.iter().next().unwrap())
+        };
         std_listener.set_nonblocking(true)?;
         UnixListener::from_std(std_listener).unwrap()
     };
@@ -88,16 +86,18 @@ async fn handle_and_map_err(req: Request<Incoming>) -> Result<Response<Full<Byte
     }
 }
 
-async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> {
+async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
     let root = PathBuf::from_str(
         req.headers()
             .get("X-Index-Root")
             .ok_or_else(|| Error::msg("missing X-Index-Root header"))?
             .to_str()?,
     )?
-    .canonicalize()?;
+    .canonicalize()
+    .with_context(|| "could not canonicalize root")?;
 
-    let base = req.headers()
+    let base = req
+        .headers()
         .get("X-Index-URL-Base")
         .ok_or_else(|| Error::msg("missing X-Index-URL-Base header"))?
         .to_str()?;
@@ -110,8 +110,9 @@ async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> 
     let uripath = uripath[base.len() + 1..].to_string();
 
     let path = root
-        .join(PathBuf::from(uripath))
-        .canonicalize()?;
+        .join(PathBuf::from(&uripath))
+        .canonicalize()
+        .with_context(|| format!("could not canonicalize path {:?}", uripath))?;
 
     if !path.starts_with(&root) {
         return Err(Error::msg("path is outside of root"));
@@ -147,7 +148,7 @@ async fn thumbnail(
     req: &Request<Incoming>,
     path: &Path,
     q: &str,
-) -> Result<Response<Full<Bytes>>, Error> {
+) -> AnyhowResult<Response<Full<Bytes>>> {
     let et = EntityTag::from_file_meta(&fs::metadata(path)?);
     if et.satisfies_request(req) {
         return Ok(Response::builder().status(304).body(Full::from(""))?);
@@ -178,9 +179,7 @@ async fn listing(
     req: &Request<Incoming>,
     root: &Path,
     path: &Path,
-) -> Result<Response<Full<Bytes>>, Error> {
-    let ctx = DirentTemplate {};
-
+) -> AnyhowResult<Response<Full<Bytes>>> {
     let mut tmpl_dir = path.to_path_buf();
     let mut tera: Option<Tera> = None;
     while tmpl_dir.starts_with(root) {
@@ -205,7 +204,7 @@ async fn listing(
 
     tera.register_filter("as_bytes", AsBytesFilter);
     let mut context = Context::new();
-    let mut entries = ctx.entries(path, true)?;
+    let mut entries = Entry::entries(path, true)?;
     entries.sort_by_key(|f| f.file_name.clone());
     context.insert("entries", &entries);
     context.insert("path", req.uri().path());
