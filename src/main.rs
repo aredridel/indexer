@@ -160,13 +160,25 @@ async fn handle(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, Error> 
     let root = PathBuf::from_str(
         req.headers()
             .get("X-Index-Root")
-            .expect("X-Index-Root header is absent")
+            .ok_or_else(|| Error::msg("missing X-Index-Root header"))?
             .to_str()?,
     )?
     .canonicalize()?;
 
+    let base = req.headers()
+        .get("X-Index-URL-Base")
+        .ok_or_else(|| Error::msg("missing X-Index-URL-Base header"))?
+        .to_str()?;
+
+    let uripath = req.uri().path().to_string();
+    if !uripath.starts_with(base) {
+        return Err(Error::msg("path is outside of base"));
+    }
+
+    let uripath = uripath[base.len() + 1..].to_string();
+
     let path = root
-        .join(PathBuf::from(req.uri().path().to_string().split_off(1)))
+        .join(PathBuf::from(uripath))
         .canonicalize()?;
 
     if !path.starts_with(&root) {
