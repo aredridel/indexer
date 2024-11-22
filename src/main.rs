@@ -14,6 +14,7 @@ use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::fs;
 use std::io::Cursor;
+#[cfg(target_os = "linux")]
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -107,7 +108,9 @@ impl DirentTemplate {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    #[cfg(target_os = "linux")]
     let listenfds = systemd::daemon::listen_fds(false)?;
+    #[cfg(target_os = "linux")]
     let listener = if listenfds.is_empty() {
         if fs::exists("warp.sock")? {
             fs::remove_file("warp.sock")?;
@@ -118,6 +121,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std_listener.set_nonblocking(true)?;
         UnixListener::from_std(std_listener).unwrap()
     };
+    #[cfg(not(target_os = "linux"))]
+    if fs::exists("warp.sock")? {
+        fs::remove_file("warp.sock")?;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let listener = UnixListener::bind("warp.sock").unwrap();
 
     // We start a loop to continuously accept incoming connections
     loop {
