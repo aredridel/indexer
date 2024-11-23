@@ -2,7 +2,7 @@ use anyhow::{Error, Result};
 use serde::Serialize;
 use std::error::Error as StdError;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
@@ -13,6 +13,7 @@ pub struct Entry {
     pub file_name: String,
     pub is_dir: bool,
     pub is_image: bool,
+    pub is_private: bool,
     pub size: u64,
     pub time: u64,
     pub type_marker: String,
@@ -44,6 +45,7 @@ impl Entry {
         let xa = xattr::get(de.path(), "description").map_or("".to_string(), |e| {
             e.map_or("".to_string(), |e| String::from_utf8_lossy(&e).to_string())
         });
+        let is_private = metadata.permissions().mode() & 4 == 0;
         Ok(Entry {
             file_name: de
                 .file_name()
@@ -51,6 +53,7 @@ impl Entry {
                 .map_err(|_| Error::msg("non utf-8 path"))?,
             is_image: Entry::is_image(de)?,
             is_dir,
+            is_private,
             description: xa,
             time: metadata
                 .created()?
