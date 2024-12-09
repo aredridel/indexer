@@ -83,6 +83,12 @@ impl Entry {
             .file_name()
             .to_str()
             .ok_or_else(|| Error::msg("non utf-8 path"))
-            .map(|f| f.ends_with(".png") || f.ends_with(".jpg") || f.ends_with(".jpeg"))
+            .map(|f| {
+                f.ends_with(".png")
+                    || f.ends_with(".jpg")
+                    || f.ends_with(".jpeg")
+                    || f.ends_with(".JPG")
+                    || f.ends_with(".PNG")
+            })
     }
 }
