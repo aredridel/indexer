@@ -8,6 +8,7 @@ use hyper::{Request, Response};
 use std::fs;
 use std::path::Path;
 use tera::{Context, Tera};
+use urlencoding::decode as urldecode;
 
 pub async fn listing(
     req: &Request<Incoming>,
@@ -42,7 +43,10 @@ pub async fn listing(
         Entry::entries(path, true).with_context(|| format!("getting entries for {:?}", path))?;
     entries.sort_by_key(|f| f.file_name.clone());
     context.insert("entries", &entries);
-    context.insert("path", req.uri().path());
+    context.insert(
+        "path",
+        &urldecode(req.uri().path()).with_context(|| "could not decode path as UTF-8")?,
+    );
 
     let mut desc_path = path.to_path_buf();
     desc_path.push("README.md");

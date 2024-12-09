@@ -21,6 +21,7 @@ use std::os::fd::FromRawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use tokio::net::UnixListener;
+use urlencoding::decode as urldecode;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -84,15 +85,16 @@ async fn handle_and_map_err(req: Request<Incoming>) -> Result<Response<Full<Byte
 }
 
 async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
-    let root = PathBuf::from_str(
-        req.headers()
-            .get("X-Index-Root")
-            .ok_or_else(|| Error::msg("missing X-Index-Root header"))?
-            .to_str()?,
-    )
-    .with_context(|| "cannot construct root pathbuf")?
-    .canonicalize()
-    .with_context(|| "could not canonicalize root")?;
+    let root = req
+        .headers()
+        .get("X-Index-Root")
+        .ok_or_else(|| Error::msg("missing X-Index-Root header"))?
+        .to_str()
+        .with_context(|| "cannot convert root to string")
+        .and_then(|s| urldecode(s).with_context(|| "could not decode root as UTF-8"))
+        .map(|s| PathBuf::from_str(&s).unwrap())?
+        .canonicalize()
+        .with_context(|| "could not canonicalize root")?;
 
     let base = req
         .headers()
@@ -105,10 +107,11 @@ async fn handle(req: Request<Incoming>) -> AnyhowResult<Response<Full<Bytes>>> {
         bail!("path is outside of base");
     }
 
-    let uripath = uripath[base.len() + 1..].to_string();
+    let uripath =
+        urldecode(&uripath[base.len() + 1..]).with_context(|| "could not decode path as UTF-8")?;
 
     let path = root
-        .join(PathBuf::from(&uripath))
+        .join(PathBuf::from(&uripath.to_string()))
         .canonicalize()
         .with_context(|| {
             format!(
