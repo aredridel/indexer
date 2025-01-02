@@ -1,3 +1,4 @@
+#[macro_use] extern crate rocket;
 mod as_byte_filter;
 mod entry;
 mod etag_rejectable;
@@ -23,8 +24,18 @@ use std::str::FromStr;
 use tokio::net::UnixListener;
 use urlencoding::decode as urldecode;
 
+#[get("/")]
+fn index() -> &'static str {
+    "Hello, world!"
+}
+
+#[launch]
+fn rocket() -> _ {
+    rocket::build().mount("/", routes![index])
+}
+
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn xmain() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     #[cfg(target_os = "linux")]
     let listenfds = systemd::daemon::listen_fds(false)?;
     #[cfg(target_os = "linux")]
